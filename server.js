@@ -3,21 +3,31 @@ const express = require('express');
 const app = express();
 
 const cors = require('cors');
-const runner = require('./test-runner');
-
 const bodyParser = require('body-parser');
+const fs = require('fs');
+const path = require('path');
+
+// Only load test runner if not on Vercel (production) and tests folder exists
+let runner;
+const testsPath = path.join(__dirname, 'tests');
+if (!process.env.VERCEL && fs.existsSync(testsPath)) {
+  runner = require('./test-runner');
+} else {
+  console.log('Skipping test-runner in production.');
+}
+
 app.use(bodyParser.json());
 
 app.get('/', function (req, res) {
   res.sendFile(__dirname + '/views/index.html');
-})
+});
 
 app.use(express.static(__dirname + '/public'));
 
 app.get('/hello', function (req, res) {
   const name = req.query.name || 'Guest';
   res.type('txt').send('hello ' + name);
-})
+});
 
 const travellers = function (req, res) {
   let data = {};
@@ -61,42 +71,43 @@ const travellers = function (req, res) {
   res.json(data);
 };
 
-
 app.route('/travellers')
   .put(travellers);
 
 let error;
 app.get('/_api/get-tests', cors(), function (req, res, next) {
-  if (error)
-    return res.json({ status: 'unavailable' });
+  if (error) return res.json({ status: 'unavailable' });
   next();
 },
   function (req, res, next) {
-    if (!runner.report) return next();
+    if (!runner || !runner.report) return next();
     res.json(testFilter(runner.report, req.query.type, req.query.n));
   },
   function (req, res) {
+    if (!runner) return res.json({ status: 'tests not running in production' });
     runner.on('done', function (report) {
       process.nextTick(() => res.json(testFilter(runner.report, req.query.type, req.query.n)));
     });
   });
 
-
 const port = process.env.PORT || 3000;
 app.listen(port, function () {
   console.log("Listening on port " + port);
-  console.log('Running Tests...');
-  setTimeout(function () {
-    try {
-      runner.run();
-    } catch (e) {
-      error = e;
-      console.log('Tests are not valid:');
-      console.log(error);
-    }
-  }, 1500);
-});
 
+  // Only run tests locally
+  if (!process.env.VERCEL && runner) {
+    console.log('Running Tests...');
+    setTimeout(function () {
+      try {
+        runner.run();
+      } catch (e) {
+        error = e;
+        console.log('Tests are not valid:');
+        console.log(error);
+      }
+    }, 1500);
+  }
+});
 
 module.exports = app; // for testing
 
